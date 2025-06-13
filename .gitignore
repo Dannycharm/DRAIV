@@ -1,0 +1,13 @@
+# Ignore Python bytecode files
+__pycache__/
+*.pyc
+
+# Ignore Jupyter notebooks checkpoints
+.ipynb_checkpoints/
+
+# Ignore PyTorch models
+*.pt
+
+# Ignore Singularity images
+*.sif
+

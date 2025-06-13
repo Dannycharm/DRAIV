@@ -1,0 +1,2 @@
+DRAIV (pronounced “drive”) is an intelligent driver-assistance system that sees, reasons, and speaks in real time. It detects traffic signs, tracks moving vehicles and pedestrians, monitors lane position, and delivers concise voice alerts.
+DRAIV is tuned for elderly drivers, novices, and people with disabilities and ships in GPU-enabled Docker containers so every collaborator or reviewer runs the identical stack—from a laptop to an AWS GPU instance to a Jetson edge device.
