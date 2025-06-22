@@ -1,0 +1,24 @@
+# -------------
+
+path: /datasets/bddk100k/bdd100k          # resolves inside container
+train: images/100k/train
+val:   images/100k/val
+test:  images/100k/test          # optional
+
+names:
+  0: car
+  1: traffic sign
+  2: traffic light
+  3: pedestrian
+  4: truck
+  5: bus
+  6: bicycle
+  7: rider
+  8: motorcycle
+  9: other vehicle
+  10: other person
+  11: train
+  12: trailer
+nc: 13        # optional; inferred from names if omitted
+
+# -------------

@@ -11,3 +11,10 @@ __pycache__/
 # Ignore Singularity images
 *.sif
 
+# Ignore output files
+*.out
+
+# Ignore image format files
+*.jpg
+*.png
+
