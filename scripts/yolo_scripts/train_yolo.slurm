@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J yolo-exp04-100_epochs
+#SBATCH -J yolo-exp_v12s_05
 #SBATCH -p secondary                 # H100 partition
 #SBATCH --gres=gpu:H100:1
 #SBATCH -c 8                         # dataloader workers
@@ -32,12 +32,13 @@ apptainer exec --nv --cleanenv \
   -B "$RUN_HOST":/workspace/runs \
   "$IMG" \
    yolo detect train \
-      model=/workspace/runs/my_yolo_experiments/exp0_3/weights/last.pt \
+      model=/workspace/runs/my_yolo_experiments/exp_v12s_04/weights/last.pt \
       project=/workspace/runs/my_yolo_experiments \
-      name=exp0_4 \
-      epochs=100 \
-      batch=64 imgsz=640 \
-      half=True cache=disk workers=8 \
-      save_period=5 \
+      name=exp_v12s_05 \
+      epochs=60 \
+      batch=48 imgsz=640 \
+      half=True cache=labels workers=8 \
+      cos_lr=True warmup_epochs=0 \
+      save_period=5 nbs=48 \
       data=/workspace/configs/bdd100k_det.yaml      # ← no “\” here
 
