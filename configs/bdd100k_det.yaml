@@ -1,6 +1,6 @@
 # -------------
 
-path: /datasets/bddk100k/bdd100k          # resolves inside container
+path: /datasets/bdd100k/       # resolves inside container
 train: images/100k/train
 val:   images/100k/val
 test:  images/100k/test          # optional

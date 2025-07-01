@@ -14,7 +14,5 @@ __pycache__/
 # Ignore output files
 *.out
 
-# Ignore image format files
-*.jpg
-*.png
-
+#Ignore virtual Environment
+virtual_env/
