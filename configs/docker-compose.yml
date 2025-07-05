@@ -2,38 +2,34 @@ version: "3.9"
 
 services:
   yolo-train:
-    image: draiv-dev:0.1          # built locally from your Dockerfile
-    # ──────────────────────────────────────────────────────────────
-    # One long CLI line is fine, but a YAML literal block keeps it readable
+    image: draiv-dev:0.1  # Replace with your Docker image tag
     command: >
       yolo detect train
-        resume=True                                  # ← pick up weights/last.pt
-        project=/workspace/runs/my_yolo_experiments  # (same as first run)
-        name=exp0_1
+        model=yolo12m.pt
+        project=/workspace/runs/my_yolo_experiments
+        name=yolo12m_01
         epochs=100
-        batch=64
+        batch=48
         imgsz=640
-        cache=True
+        half=True
+        cache=labels
+        workers=10
+        cos_lr=True
+        warmup_epochs=3
+        save_period=5
         data=/workspace/configs/bdd100k_det.yaml
-        device=0
-        save_period=5                                # checkpoint every 5 epochs
-    # ──────────────────────────────────────────────────────────────
     environment:
-      # dataloader workers = host CPU threads you plan to allocate
-      - ULTRALYTICS_WORKERS=8
-      # optional: silence the “new version available” banner
+      - ULTRALYTICS_WORKERS=10
       - ULTRALYTICS_NO_UPGRADE=1
     volumes:
-      # dataset lives on the host’s scratch → inside container /datasets
-      -  /u/pdanie20/scratch/DRAIV_altREU/datasets/:/datasets
-      # repo root
-      - /u/pdanie20/scratch/DRAIV_altREU/DRAIV:/workspace
+      - /scratch/dannycharm-alt-REU/DRAIV/datasets:/datasets
+      - /scratch/dannycharm-alt-REU/DRAIV:/workspace
+      - /scratch/dannycharm-alt-REU/DRAIV/runs:/workspace/runs
     deploy:
       resources:
         reservations:
           devices:
-            - capabilities: [gpu]   # Compose v3 syntax for NVIDIA runtime
-    # Helpful if you use Docker Engine locally (avoids small /dev/shm)
-    shm_size: "16gb"
-    restart: "no"                   # don’t auto-restart on CTRL-C
+            - capabilities: [gpu]  # Requires Docker Compose v3+ and NVIDIA runtime
+    shm_size: "64gb"
+    restart: "no"
 
