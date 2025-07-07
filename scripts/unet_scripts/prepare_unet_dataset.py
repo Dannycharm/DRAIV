@@ -2,22 +2,23 @@
 # Resize images and masks
 # Remap pixel values in masks (e.g., 4, 6, 22 → 1; 255 → 0)
 # Save resized, remapped results to output folders
+
 import os
 from PIL import Image
 import numpy as np
 from tqdm import tqdm
 
 # === CONFIG ===
-INPUT_IMG_DIR = '/datasets/bddk100k/bdd100k/images/100k/val/'
-INPUT_MASK_DIR = '/datasets/bddk100k/bdd100k/labels/lane/masks/val/'
-OUT_IMG_DIR = '/datasets/unet/processed/images/val'
-OUT_MASK_DIR = '/datasets/unet/processed/labels/masks/val'
+INPUT_IMG_DIR = '/scratch/dannycharm-alt-REU/DRAIV/datasets/bdd100k/images/100k/train/'
+INPUT_MASK_DIR = '/scratch/dannycharm-alt-REU/DRAIV/datasets/bdd100k/labels/lane/masks/train/'
+OUT_IMG_DIR = '/scratch/dannycharm-alt-REU/DRAIV/datasets/unet/processed/images/train'
+OUT_MASK_DIR = '/scratch/dannycharm-alt-REU/DRAIV/datasets/unet/processed/labels/masks/train'
 
 #And when I process your validation set, I can use:
-#   INPUT_IMG_DIR = '/datasets/bddk100k/bdd100k/images/100k/val/'
-#   INPUT_MASK_DIR = '/datasets/bddk100k/bdd100k/labels/lane/masks/val/'
-#   OUT_IMG_DIR = '/datasets/unet/processed/images/val'
-#   OUT_MASK_DIR = '/datasets/unet/processed/labels/masks/val'
+#   INPUT_IMG_DIR = '/scratch/dannycharm-alt-REU/DRAIV/datasets/bdd100k/images/100k/val/'
+#   INPUT_MASK_DIR = '/scratch/dannycharm-alt-REU/DRAIV/datasets/bdd100k/labels/lane/masks/val/'
+#   OUT_IMG_DIR = '/scratch/dannycharm-alt-REU/DRAIV/datasets/unet/processed/images/val'
+#   OUT_MASK_DIR = '/scratch/dannycharm-alt-REU/DRAIV/datasets/unet/processed/labels/masks/val'
 
 RESIZE_SHAPE = (512, 512)
 
