@@ -1,0 +1,5 @@
+outs:
+- md5: 578aeb731a5870aa0a26297db0689853
+  size: 81196426
+  hash: md5
+  path: best.torchscript
