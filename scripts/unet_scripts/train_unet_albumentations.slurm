@@ -1,6 +1,6 @@
 #!/bin/bash
-#SBATCH -J unet_lane                # Job name
-#SBATCH --time=18:00:00             # 18 hour wall-clock
+#SBATCH -J unet_101_crop_2                # Job name
+#SBATCH --time=3-00:00:00             # 3 day wall-clock
 #SBATCH --nodes=1                  # one node is enough for 1 GPU
 #SBATCH --ntasks=10                 # 10 CPU cores total  (8 dataloader workers)
 #SBATCH --gres=gpu:l40s:1          # 1 L40S GPU  (change to a30 etc.)
@@ -20,9 +20,9 @@ REPO=/scratch/dannycharm-alt-REU/DRAIV           # git repo root
 apptainer exec --nv \
   --bind "$DATA_DIR":/datasets,"$REPO":/workspace \
   "$IMG" \
-  python /workspace/scripts/unet_scripts/train_unet.py \
+    python /workspace/scripts/unet_scripts/train_unet_albumentations.py \
      --data_root /datasets/unet/processed_no_reshape \
      --epochs 40 --batch_size 4 --lr 5e-4 \
      --amp \
-     --save_dir /workspace/runs/unet_lane/unet_full_training_03
-
+     --accum_steps 2 \
+     --save_dir /workspace/runs/unet_lane/unet_101_crop_full_training_02

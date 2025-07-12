@@ -17,3 +17,7 @@ __pycache__/
 
 #Ignore virtual Environment
 virtual_env/
+
+#Ignore videos
+*.mp4
+*.avi

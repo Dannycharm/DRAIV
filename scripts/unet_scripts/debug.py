@@ -1,25 +1,12 @@
-"""
-Train a 2-class U-Net (lane vs background) on the pre-processed BDD100K dataset.
-
-Usage
------
-
-python train_unet.py \
-  --data_root /datasets/unet/processed \
-  --epochs 30 \
-  --batch_size 16 \
-  --lr 1e-3 \
-  --save_dir runs/unet_lane
-  --amp 
-"""
-
-import argparse, os, time, json, math
+import argparse, os, time, json, math, cv2
 from tqdm import tqdm
 from pathlib import Path
 import torch, torch.nn as nn
 from torch.utils.data import DataLoader
 import torchvision.transforms as T
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import autocast, GradScaler
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 import segmentation_models_pytorch as smp   # pip install segmentation-models-pytorch
 from unet_dataset import UNetSegmentationDataset
 
@@ -59,6 +46,9 @@ def soft_dice_loss(pred, target, eps=1e-6):
     return 1 - dice.mean()
 
 # ────────────────────────────────────────────────────────────────────────────────
+def squeeze_and_long(x, **kwargs):
+        return x.squeeze(0).long()
+
 
 def main():
 
@@ -67,32 +57,38 @@ def main():
     os.makedirs(args.save_dir, exist_ok=True)
 
     # Data ----------------------------------------------------------------------
-    tf_img = T.Compose([
-        T.ToTensor(),
-        T.Normalize(mean=[0.485,0.456,0.406],
-
-                    std=[0.229,0.224,0.225])
-
-    ])
-
-    tf_mask = T.Compose([
-        T.PILToTensor(),
-        lambda x: x.squeeze(0).long()
-
+    tf_img = A.Compose([
+        A.HorizontalFlip(p=0.5),
+        A.Affine(
+            scale=(0.92, 1.08),                 # ±8 % like before
+            translate_percent=(-0.02, 0.02),    # ±2 % shift
+            rotate=(-2, 2),                     # ±2°
+            shear=(-2, 2),                      # tiny shear
+            interpolation=cv2.INTER_LINEAR,
+            mask_interpolation=cv2.INTER_NEAREST,
+            fit_output=False,                   # keeps 1280 × 720
+            fill=0, fill_mask=0,                # same as fill / fill_mask
+            p=0.7
+        ),
+        A.RandomBrightnessContrast(0.2,0.2,p=0.5),
+        A.GaussianBlur(blur_limit=3,p=0.2),
+        A.Normalize((0.485,0.456,0.406),(0.229,0.224,0.225)),
+        ToTensorV2(),
+        A.Lambda(mask=squeeze_and_long)
     ])
 
     train_ds = UNetSegmentationDataset(
         image_dir=f"{args.data_root}/images/train",
         mask_dir=f"{args.data_root}/labels/masks/train",
         transform=tf_img,
-        target_transform=tf_mask
+        target_transform=None
     )
 
     val_ds   = UNetSegmentationDataset(
         image_dir=f"{args.data_root}/images/val",
         mask_dir=f"{args.data_root}/labels/masks/val",
         transform=tf_img,
-        target_transform=tf_mask
+        target_transform=None
     )
 
     train_loader = DataLoader(train_ds, batch_size=args.batch_size,
@@ -102,7 +98,7 @@ def main():
                               shuffle=False, num_workers=4, pin_memory=True)
 
 # ─── AMP & scaler ─────────────────────────────────────────────
-    scaler = GradScaler(enabled=args.amp)
+    scaler = GradScaler('cuda', enabled=args.amp)
 
 # Model ---------------------------------------------------------------------
 
@@ -113,7 +109,7 @@ def main():
     ce = nn.CrossEntropyLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
-    
+
     warmup_epochs = 2
     def lr_lambda(epoch):
         if epoch < warmup_epochs:
@@ -130,77 +126,16 @@ def main():
 
     patience, bad = 3, 0
 
-    # Training loop -------------------------------------------------------------
 
-    for epoch in range(1, args.epochs + 1):
-        model.train()
-        running_loss = 0.0
-        for imgs, masks in tqdm(train_loader, desc=f"Epoch {epoch}/{args.epochs}"):
-            imgs, masks = imgs.to(device), masks.to(device)
-            optimizer.zero_grad()
-            with autocast(enabled=args.amp):
-                out = model(imgs)
-                loss = 0.6 * ce(out, masks) + 0.4 * soft_dice_loss(out, masks)
 
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
-            running_loss += loss.item() * imgs.size(0)
-
-        train_loss = running_loss / len(train_ds)
-        
-        scheduler.step()
-
-        # Validation ------------------------------------------------------------
-
-        model.eval(); val_loss = 0.0; val_dice = 0.0
-
-        with torch.no_grad():
-
-            for imgs, masks in val_loader:
-                imgs, masks = imgs.to(device), masks.to(device)
-                out = model(imgs)
-                val_loss += (0.6 * ce(out, masks) + 0.4 * soft_dice_loss(out, masks)).item() * imgs.size(0)
-                val_dice  += dice_coefficient(out, masks.float()).item() * imgs.size(0)
-
-        val_loss /= len(val_ds)
-        val_dice  /= len(val_ds)
-
-        # Logging ---------------------------------------------------------------
-
-        history.append({
-
-            "epoch": epoch,
-            "train_loss": train_loss,
-            "val_loss": val_loss,
-            "val_dice": val_dice
-
-        })
-
-        print(f"[{epoch:03}/{args.epochs}] "
-
-              f"train_loss={train_loss:.4f}  "
-              f"val_loss={val_loss:.4f}  "
-              f"val_dice={val_dice:.4f}")
-
-        # Checkpoint ------------------------------------------------------------
-
-        if val_dice > best_dice:
-            best_dice = val_dice
-            bad = 0
-            torch.save(model.state_dict(), f"{args.save_dir}/best.pt")
-        else:
-            bad += 1
-            if bad >= patience:
-                print("Early stop: no Dice improvement for 3 epochs.")
-                break
-
-    # Save training log ---------------------------------------------------------
-
-    json.dump(history, open(f"{args.save_dir}/history.json","w"), indent=2)
-    elapsed = time.time() - start
-    print(f"Training finished in {elapsed/60:.1f} min. Best Dice: {best_dice:.4f}")
+    print("Starting debug...")
+    imgs, masks = next(iter(train_loader))
+    print("Loaded batch")
+    print(torch.unique(masks), masks.dtype)
+    print("image shape is:", imgs.shape)
+    print("mask shape is:", masks.shape)
+    if scaler.is_enabled():
+        print("AMP is on")
 
 if __name__ == "__main__":
-
     main()

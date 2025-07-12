@@ -10,10 +10,6 @@
 #SBATCH --mail-user=pdanie20@illinois.edu
 # ────────────────────────────────────────────
 
-# ───────────── host-side paths ─────────────
-DATA_DIR=/scratch/dannycharm-alt-REU/DRAIV/datasets
-IMG=/scratch/dannycharm-alt-REU/DRAIV/draiv-dev_0.1.sif
-
 source /scratch/dannycharm-alt-REU/DRAIV/virtual_env/bin/activate
 
 python3 /scratch/dannycharm-alt-REU/DRAIV/scripts/unet_scripts/prepare_unet_dataset.py

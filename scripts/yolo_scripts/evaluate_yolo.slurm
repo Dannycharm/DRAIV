@@ -33,8 +33,8 @@ apptainer exec --nv --cleanenv \
   -B "$RUN_HOST":/workspace/runs \
   "$IMG" \
    yolo detect val \
-      model=/workspace/runs/my_yolo_experiments/yolo12m_01/weights/best.pt \
+      model=/workspace/temporary_files/best.pt \
       project=/workspace/runs/my_yolo_experiments \
-      name=yolo12m_best_model_evaluation \
+      name=yolo12m_toon_model_evaluation \
       data=/workspace/configs/bdd100k_det.yaml      # ← no “\” here
 
