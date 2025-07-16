@@ -99,7 +99,7 @@ def train(
         if args.onGPU == True:
             input = input.cuda().float() / 255.0
         output = model(input)
-        with torch.cuda.amp.autocast():
+        with torch.amp.autocast("cuda"):
             focal_loss, tversky_loss, loss = criterion(output, target)
 
         scaler.scale(loss).backward()
@@ -149,6 +149,9 @@ def val(val_loader=None, model=None, half=False, args=None):
         out_da = output[0]
         target_da = target[0]
 
+        #print("output da: ", out_da.size())
+        #print("target da: ", target_da.size())
+
         _, da_predict = torch.max(out_da, 1)
         da_predict = da_predict[:, 12:-12]
         _, da_gt = torch.max(target_da, 1)
@@ -169,6 +172,9 @@ def val(val_loader=None, model=None, half=False, args=None):
         out_ll = output[1]
         target_ll = target[1]
 
+        #print("output ll: ", out_ll.size())
+        #print("target ll: ", target_ll.size())
+        
         _, ll_predict = torch.max(out_ll, 1)
         ll_predict = ll_predict[:, 12:-12]
         _, ll_gt = torch.max(target_ll, 1)

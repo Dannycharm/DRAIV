@@ -1,3 +1,5 @@
+'''  I changed segmentation threshold from 1 to 0 for seg and seg_b '''
+
 import math
 import os
 import random
@@ -209,10 +211,10 @@ class DatasetOneTask(torch.utils.data.Dataset):
         self.Tensor = transforms.ToTensor()
         self.valid = valid
         if valid:
-            self.root = "../bdd100k/images/val"
+            self.root = "/workspace/datasets/bdd100k/images/100k/val"
             self.names = os.listdir(self.root)
         else:
-            self.root = "../bdd100k/images/train"
+            self.root = "/workspace/datasets/bdd100k/images/100k/train"
             self.names = os.listdir(self.root)
 
     def __len__(self):
@@ -231,14 +233,14 @@ class DatasetOneTask(torch.utils.data.Dataset):
         image = cv2.imread(image_name)
         if self.task == "DA":
             label = cv2.imread(
-                image_name.replace("images", "drivable_area_annotations").replace(
+                image_name.replace("images/100k", "labels/drivable/masks").replace(
                     "jpg", "png"
                 ),
                 0,
             )
         if self.task == "LL":
             label = cv2.imread(
-                image_name.replace("images", "lane_line_annotations").replace(
+                image_name.replace("images/100k", "labels/preprocessed_lane").replace(
                     "jpg", "png"
                 ),
                 0,
@@ -277,8 +279,8 @@ class DatasetOneTask(torch.utils.data.Dataset):
 
         label = cv2.resize(label, (W_, 360))
 
-        _, seg_b = cv2.threshold(label, 1, 255, cv2.THRESH_BINARY_INV)
-        _, seg = cv2.threshold(label, 1, 255, cv2.THRESH_BINARY)
+        _, seg_b = cv2.threshold(label, 0, 255, cv2.THRESH_BINARY_INV)
+        _, seg = cv2.threshold(label, 0, 255, cv2.THRESH_BINARY)
 
         seg = self.Tensor(seg)
         seg_b = self.Tensor(seg_b)
@@ -323,10 +325,10 @@ class Dataset(torch.utils.data.Dataset):
         self.Tensor = transforms.ToTensor()
         self.valid = valid
         if valid:
-            self.root = "../bdd100k/images/val"
+            self.root = "/workspace/datasets/bdd100k/images/100k/val"
             self.names = os.listdir(self.root)
         else:
-            self.root = "../bdd100k/images/train"
+            self.root = "/workspace/datasets/bdd100k/images/100k/train"
             self.names = os.listdir(self.root)
 
     def __len__(self):
@@ -345,13 +347,13 @@ class Dataset(torch.utils.data.Dataset):
         image = cv2.imread(image_name)
 
         label1 = cv2.imread(
-            image_name.replace("images", "drivable_area_annotations").replace(
+            image_name.replace("images/100k", "labels/drivable/masks").replace(
                 "jpg", "png"
             ),
             0,
         )
         label2 = cv2.imread(
-            image_name.replace("images", "lane_line_annotations").replace("jpg", "png"),
+            image_name.replace("images/100k", "labels/preprocessed_lane").replace("jpg", "png"),
             0,
         )
 
@@ -390,10 +392,10 @@ class Dataset(torch.utils.data.Dataset):
         label1 = cv2.resize(label1, (W_, 360))
         label2 = cv2.resize(label2, (W_, 360))
 
-        _, seg_b1 = cv2.threshold(label1, 1, 255, cv2.THRESH_BINARY_INV)
-        _, seg_b2 = cv2.threshold(label2, 1, 255, cv2.THRESH_BINARY_INV)
-        _, seg1 = cv2.threshold(label1, 1, 255, cv2.THRESH_BINARY)
-        _, seg2 = cv2.threshold(label2, 1, 255, cv2.THRESH_BINARY)
+        _, seg_b1 = cv2.threshold(label1, 0, 255, cv2.THRESH_BINARY_INV)
+        _, seg_b2 = cv2.threshold(label2, 0, 255, cv2.THRESH_BINARY_INV)
+        _, seg1 = cv2.threshold(label1, 0, 255, cv2.THRESH_BINARY)
+        _, seg2 = cv2.threshold(label2, 0, 255, cv2.THRESH_BINARY)
 
         seg1 = self.Tensor(seg1)
         seg2 = self.Tensor(seg2)

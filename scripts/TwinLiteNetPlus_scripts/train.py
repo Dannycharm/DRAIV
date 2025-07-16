@@ -1,3 +1,18 @@
+''' 
+
+Run with: 
+
+DATA_DIR=/scratch/dannycharm-alt-REU/DRAIV/datasets
+IMG=/scratch/dannycharm-alt-REU/DRAIV/draiv_ml.sif
+REPO=/scratch/dannycharm-alt-REU/DRAIV      
+
+
+    python /workspace/scripts/TwinLiteNetPlus_scripts/train.py --config medium --max_epochs 3 --ema 
+
+'''
+
+
+
 import math
 import os
 from argparse import ArgumentParser
@@ -57,6 +72,13 @@ def train_net(args, hyp):
         pin_memory=True,
     )
 
+    # I added this -----------------------
+    #name_temp, img_temp, mask_temp = next(iter(trainLoader))
+    #print("input image size:  ", img_temp[0].size() )
+    #print("mask image size:  ", mask_temp[0].size() )
+    #------------------------------
+
+
     valLoader = torch.utils.data.DataLoader(
         BDD100K.Dataset(hyp, valid=True),
         batch_size=args.batch_size,
@@ -100,7 +122,7 @@ def train_net(args, hyp):
         else:
             print(f"=> No valid checkpoint found at '{args.resume}'")
 
-    scaler = torch.cuda.amp.GradScaler()
+    scaler = torch.amp.GradScaler('cuda')
 
     for epoch in range(start_epoch, args.max_epochs):
         model_file_name = os.path.join(args.savedir, f"model_{epoch}.pth")
@@ -161,12 +183,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("--batch_size", type=int, default=16, help="Batch size")
     parser.add_argument(
-        "--savedir", default="./testv3", help="Directory to save the results"
+        "--savedir", default="/workspace/runs/TwinLiteNetPlus_lane/test_dir", help="Directory to save the results"
     )
     parser.add_argument(
         "--hyp",
         type=str,
-        default="./hyperparameters/twinlitev2_hyper.yaml",
+        default="/workspace/scripts/TwinLiteNetPlus_scripts/hyperparameters/twinlitev2_hyper.yaml",
         help="Path to hyperparameters YAML",
     )
     parser.add_argument(
