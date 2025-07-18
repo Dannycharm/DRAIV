@@ -10,7 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         python3 python3-venv python3-pip python-is-python3 \
-        git wget curl ffmpeg libespeak1 build-essential python3-dev aria2 && \
+        git wget curl ffmpeg libzmq3-dev libespeak1 build-essential python3-dev aria2 && \
     rm -rf /var/lib/apt/lists/*
 
 # ────────────────────────────────────────────────────────────────────────────────
@@ -24,12 +24,12 @@ RUN python3 -m pip install --upgrade pip && \
         torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 && \
     # --- YOLO ---------------------------------------------------------------
     pip install --no-cache-dir \
-        ultralytics==8.3.162 opencv-contrib-python==4.12.0.88 && \
+        ultralytics==8.3.162 opencv-contrib-python-headless==4.12.0.88 && \
     # --- U-Net + encoders ------------------------------------------------------
     pip install --no-cache-dir \
         segmentation-models-pytorch==0.5.0 albumentations==2.0.8 timm==1.0.16 && \
     # --- Supervision ---------------------------------------------------
-    pip install --no-cache-dir \i
+    pip install --no-cache-dir \        
         supervision==0.26.0 && \
     # --- Object tracking -------------------------------------------------------
     pip install --no-cache-dir \
@@ -40,7 +40,7 @@ RUN python3 -m pip install --upgrade pip && \
         gtts pyttsx3 && \     
     # --- QoL / logging / viz ---------------------------------------------------
     pip install --no-cache-dir \
-        tensorboard scikit-image matplotlib shapely \
+        tensorboard scikit-image matplotlib shapely pyzmq \
         tqdm numpy pandas aria2p scipy scikit-learn pillow pyyaml==6.0.2 && \
     # --- Clean pip cache -------------------------------------------------------
     rm -rf /root/.cache/pip
