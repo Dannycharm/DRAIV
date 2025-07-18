@@ -1,5 +1,5 @@
 
-# This runs in real time, produces symbolic facts from each frame such as object detections + ByteTrack IDs + segmentation masks. This is also used for visualizing the lane and drivable area segmentation masks and detection annotations on videos 
+# This is used for visualizing the lane and drivable area segmentation masks and detection annotations on videos 
 
 import argparse
 import os
@@ -92,7 +92,7 @@ def main():
     parser.add_argument("--source", type=str, default="/datasets/videos/0000f77c-6257be58.mp4", help="video path or camera index")
     parser.add_argument("--yolo_weight", type=str, default="/workspace/models/yolo_models/best.pt", help="YOLO .pt checkpoint")
     parser.add_argument("--seg_weight", type=str, default="/workspace/models/TwinLiteNet_models/large.pth", help="Segmentation model .pth")
-    parser.add_argument("--out", type=str, default="demo_scene_2.avi")
+    parser.add_argument("--out", type=str, default="demo_scene.avi")
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--hyp", type=str, default="/workspace/scripts/TwinLiteNetPlus_scripts/hyperparameters/twinlitev2_hyper.yaml")
     parser.add_argument("--config", default="large")
@@ -143,52 +143,7 @@ def main():
         # Segmentation
         da_mask, ll_mask, img_bgr = segment_frame(frame, seg_model_args, model=seg_model)
 
-        # Compute lane offset using the lane line mask (ll_mask)
-        lane_mask = ll_mask.astype(np.uint8)  # ensure it's binary 0/1 as uint8
-
-        # Skeletonize the lane mask to get thin lines
-        centerline = cv2.ximgproc.thinning(lane_mask*255, cv2.ximgproc.THINNING_GUOHALL)
-        cols = np.where(centerline[-20:, :] > 0)[1]
-        if len(cols) > 2:
-            lane_center = int(np.mean(cols))
-            img_center = lane_mask.shape[1] // 2
-            lane_offset_px = img_center - lane_center
-        else:
-            lane_offset_px = None
-
-        # Compute drivable area ratio
-        drivable_mask = da_mask  # (already a binary 0/1 array)
-        drivable_ratio = float(drivable_mask.sum() / drivable_mask.size)
-
-        # Prepare object list from detections
-        objects_list = []
-        for bbox, cls_id, track_id in zip(det.xyxy, det.class_id, det.tracker_id):
-            x1, y1, x2, y2 = map(int, bbox)
-            class_name = model.names[int(cls_id)]
-            obj_id = int(track_id) if track_id is not None else None
-            # (Optional) compute vx for obj_id if previous position stored
-            vx = None
-            objects_list.append({
-                "id": obj_id,
-                "cls": class_name,
-                "bbox": [x1, y1, x2, y2],
-                "vx": vx
-            })
-
-        # Create and send/print JSON message
-        msg = {
-            "t": idx,
-            "ego_lane_offset_px": lane_offset_px,
-            "drivable_ratio": drivable_ratio,
-            "objects": objects_list
-        }
-
-        # pub.send_json(msg)         # publish to context engine or other subscriber
-        # Optionally print the message for verification
-        print(msg)
-
-
-        # Visualize segmentation and annotations
+        # Visualize segmentation
         vis = show_seg_result(img_bgr, (da_mask, ll_mask))
         vis = box_anno.annotate(vis, det)
         vis = lbl_anno.annotate(vis, det, labels)
@@ -200,3 +155,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+

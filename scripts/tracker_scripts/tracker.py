@@ -28,7 +28,7 @@ device = torch.device(f"cuda:{args.device}" if args.device.isdigit()
 print("Using device:", device)
 
 # --------------------- Model & Tracker Setup -----------------------
-model = YOLO(args.weights).to(device)
+model = YOLO(args.weights, verbose=False).to(device)
 tracker  = sv.ByteTrack()
 box_anno = sv.BoxAnnotator()
 lbl_anno = sv.LabelAnnotator()

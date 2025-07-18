@@ -24,12 +24,12 @@ RUN python3 -m pip install --upgrade pip && \
         torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 && \
     # --- YOLO ---------------------------------------------------------------
     pip install --no-cache-dir \
-        ultralytics==8.3.162 opencv-python-headless==4.11.0.86 && \
+        ultralytics==8.3.162 opencv-contrib-python==4.12.0.88 && \
     # --- U-Net + encoders ------------------------------------------------------
     pip install --no-cache-dir \
         segmentation-models-pytorch==0.5.0 albumentations==2.0.8 timm==1.0.16 && \
     # --- Supervision ---------------------------------------------------
-    pip install --no-cache-dir \
+    pip install --no-cache-dir \i
         supervision==0.26.0 && \
     # --- Object tracking -------------------------------------------------------
     pip install --no-cache-dir \
