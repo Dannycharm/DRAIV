@@ -23,8 +23,7 @@ from model.model import TwinLiteNetPlus
 def setup_pub(port: int = 5555):
     ctx = zmq.Context.instance()
     pub = ctx.socket(zmq.PUB)
-    pub.setsockopt(zmq.SNDHWM, 10000)
-    pub.bind(f"tcp://127.0.0.1:{port}")
+    pub.bind(f"tcp://*:{port}")
     return pub
 
 
@@ -53,10 +52,27 @@ def letterbox_for_img(img, new_shape=(640, 640), color=(114, 114, 114), auto=Tru
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
     return img, ratio, (dw, dh)
 
+def show_seg_result(img, result, palette=None):
+
+    H_pad, W_pad = img.shape[:2]
+    da_mask_r = cv2.resize(result[0], (W_pad, H_pad),
+                                   interpolation=cv2.INTER_NEAREST)
+    ll_mask_r = cv2.resize(result[1], (W_pad, H_pad),
+                                   interpolation=cv2.INTER_NEAREST)
+    color_area = np.zeros((da_mask_r.shape[0], da_mask_r.shape[1], 3), dtype=np.uint8)
+    color_area[da_mask_r == 1] = [0, 255, 0]
+    color_area[ll_mask_r == 1] = [255, 0, 0]
+    color_seg = color_area[..., ::-1]
+    color_mask = np.mean(color_seg, 2)
+    img = img.astype(np.float32)
+    img[color_mask != 0] = img[color_mask != 0] * 0.5 + color_seg[color_mask != 0] * 0.5
+    img = img.astype(np.uint8)
+    # img = cv2.resize(img, (1280, 720), interpolation=cv2.INTER_LINEAR)
+    return img
 #--------------------------------------------------------------------------
 
 def compute_lane_offset(lane_mask: np.ndarray,
-                        bottom_rows: int = 100) -> float | None:
+                        bottom_rows: int = 20) -> float | None:
     
     cols = np.where(lane_mask[-bottom_rows:, :] > 0)[1]
     if len(cols) < 2:          # not enough skeleton pixels visible
@@ -69,9 +85,6 @@ def compute_lane_offset(lane_mask: np.ndarray,
 #--------------------------------------------------------------------------
 
 def main():
-    time.sleep(12)  # Wait for subscriber to connect for 15 seconds
-    # write output
-    log_file = open("log_perception.txt", 'w')
 
     #  JSON publishing stub
     pub = setup_pub()
@@ -104,7 +117,26 @@ def main():
         raise FileNotFoundError(args.source)
     info   = sv.VideoInfo.from_video_path(args.source)
     frames = sv.get_video_frames_generator(args.source)
-    
+    # print("The video info is: ", info)
+    # info.width = 640
+    # info.height = 384
+    # print("The video info after change is: ", info)
+    # ext = os.path.splitext(args.out)[1].lower()
+    # if   ext in (".mp4", ".m4v"): codec_pref = ["mp4v", "avc1", "H264"]
+    # elif ext in (".avi",):        codec_pref = ["MJPG", "XVID"]
+    # else: raise ValueError("Unsupported output extension; use .mp4 or .avi")
+
+    # for fourcc in codec_pref:
+    #     try:
+    #         sink = sv.VideoSink(args.out, video_info=info, codec=fourcc)
+    #         sink.__enter__()
+    #         print(f"✓ Writing {args.out} with FOURCC '{fourcc}'")
+    #         break
+    #     except Exception:
+    #         continue
+    # else:
+    #     raise RuntimeError("OpenCV cannot encode the requested container; install opencv-python wheels or switch to .avi")
+
     t0 = time.time()
     for idx, frame in enumerate(frames, 1):
 
@@ -156,6 +188,7 @@ def main():
             class_name = model.names[int(cls_id)]
             obj_id = int(track_id) if track_id is not None else None
 
+            # (Optional) compute vx for obj_id if previous position stored
             # vx is a raw measure of how many pixels an object shifts left or right from one video frame to the next.
             vx = None
             if track_id is not None:
@@ -180,17 +213,19 @@ def main():
             "objects": objects_list
         }
 
-        # publish to context engine on every other frame
-        if ((idx-1) % 1) == 0:
-            pub.send_json(msg)         
+        pub.send_json(msg)         # publish to context engine or other subscriber
+        # Optionally print the message for verification
+        #print(msg)
 
-        # Print the message for verification
-        print(msg)
 
-        # save log to file
-        log_file.write(f"{msg}")
-        log_file.flush()
+        # Visualize segmentation and annotations
 
+    #     vis = show_seg_result(padded, (da_mask, ll_mask))
+    #     vis = box_anno.annotate(vis, det)
+    #     vis = lbl_anno.annotate(vis, det, labels)
+    #     sink.write_frame(vis)
+
+    # sink.__exit__(None, None, None)
     fps = idx / (time.time() - t0)
     print(f"✓ Saved {args.out} · {idx} frames · {fps:.1f} FPS")
 

@@ -13,8 +13,10 @@ __pycache__/
 # Ignore Singularity images
 *.sif
 
-# Ignore output files
+# Ignore output and log files
 *.out
+*.log
+*.txt
 
 #Ignore virtual Environment
 virtual_env/

@@ -135,7 +135,7 @@ def main():
     t0 = time.time()
     for idx, frame in enumerate(frames, 1):
         # Detect & Track
-        det = sv.Detections.from_ultralytics(model(frame, device=args.device)[0])
+        det = sv.Detections.from_ultralytics(model(frame, device=args.device, verbose=False)[0])
         det = tracker.update_with_detections(det)
         labels = [f"{model.names[c]} #{tid}"
                   for c, tid in zip(det.class_id, det.tracker_id)]

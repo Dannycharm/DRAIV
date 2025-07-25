@@ -23,8 +23,7 @@ from model.model import TwinLiteNetPlus
 def setup_pub(port: int = 5555):
     ctx = zmq.Context.instance()
     pub = ctx.socket(zmq.PUB)
-    pub.setsockopt(zmq.SNDHWM, 10000)
-    pub.bind(f"tcp://127.0.0.1:{port}")
+    pub.bind(f"tcp://*:{port}")
     return pub
 
 
@@ -52,26 +51,43 @@ def letterbox_for_img(img, new_shape=(640, 640), color=(114, 114, 114), auto=Tru
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
     return img, ratio, (dw, dh)
-
 #--------------------------------------------------------------------------
 
-def compute_lane_offset(lane_mask: np.ndarray,
-                        bottom_rows: int = 100) -> float | None:
-    
-    cols = np.where(lane_mask[-bottom_rows:, :] > 0)[1]
-    if len(cols) < 2:          # not enough skeleton pixels visible
-        return None
-    lane_center = int(cols.mean())
-    img_center  = lane_mask.shape[1] // 2
-    # + offset  => drift right,  – offset => drift left
-    return img_center - lane_center
+# def get_lane_centerline(lane_mask: np.ndarray) -> np.ndarray:
+#     """
+#     Args
+#     ----
+#     lane_mask : np.uint8 HxW   # 0 background, 1 lane pixels
+
+#     Returns
+#     -------
+#     centerline : np.uint8 HxW  # skeletonised mask (0/255)
+#     """
+#     # Ensure binary bool image for scikit-image
+#     lane_bool = lane_mask.astype(bool)
+
+#     # Zhang-Suen thinning; max_num_iter=np.inf == full skeleton
+#     skel_bool = thin(lane_bool, max_num_iter=np.inf)
+
+#     # Back to the format your downstream expects (0/255 uint8)
+#     centerline = (skel_bool * 255).astype(np.uint8)
+#     return centerline
+
+# def compute_lane_offset(lane_mask: np.ndarray,
+#                         bottom_rows: int = 20) -> float | None:
+#     skel = get_lane_centerline(lane_mask)
+#     # Consider only the rows closest to the ego vehicle
+#     cols = np.where(skel[-bottom_rows:, :] > 0)[1]
+#     if len(cols) < 2:          # not enough skeleton pixels visible
+#         return None
+#     lane_center = int(cols.mean())
+#     img_center  = lane_mask.shape[1] // 2
+#     # + offset  => drift right,  – offset => drift left
+#     return img_center - lane_center
 
 #--------------------------------------------------------------------------
 
 def main():
-    time.sleep(12)  # Wait for subscriber to connect for 15 seconds
-    # write output
-    log_file = open("log_perception.txt", 'w')
 
     #  JSON publishing stub
     pub = setup_pub()
@@ -94,17 +110,15 @@ def main():
     seg_model.load_state_dict(torch.load(seg_model_args.weight, map_location=args.device))
     seg_model.eval()
 
-    # YOLO and Tracking Setup
-    model = YOLO(args.yolo_weight).to(args.device)
-    tracker  = sv.ByteTrack(lost_track_buffer=120, minimum_matching_threshold=0.7, )
-    box_anno = sv.BoxAnnotator()
-    lbl_anno = sv.LabelAnnotator(text_scale=0.2, text_thickness=0, text_padding=5)
-
     if not os.path.exists(args.source):
         raise FileNotFoundError(args.source)
     info   = sv.VideoInfo.from_video_path(args.source)
     frames = sv.get_video_frames_generator(args.source)
-    
+    print("The video info is: ", info)
+    info.width = 640
+    info.height = 384
+    print("The video info after change is: ", info)
+
     t0 = time.time()
     for idx, frame in enumerate(frames, 1):
 
@@ -125,75 +139,18 @@ def main():
         da_mask = torch.argmax(da_mask, 1).int().squeeze().cpu().numpy()
         ll_mask = torch.argmax(ll_mask, 1).int().squeeze().cpu().numpy()
 
-        # Detect & Track
-        det = sv.Detections.from_ultralytics(model(padded, device=args.device, verbose=False)[0])
-        det = tracker.update_with_detections(det)
-        labels = [f"{model.names[c]} #{tid}"
-                  for c, tid in zip(det.class_id, det.tracker_id)]
+        # # Compute lane offset using the lane line mask (ll_mask)
+        # lane_mask = ll_mask.astype(np.uint8)  # ensure it's binary 0/1 as uint8
 
-        # Compute lane offset using the lane line mask (ll_mask)
-        lane_mask = ll_mask.astype(np.uint8)  # ensure it's binary 0/1 as uint8
+        # # Skeletonize the lane mask to get thin lines and get lane offset
+        # lane_offset_px =  compute_lane_offset(lane_mask, 180)
 
-        # lane offset
-        lane_offset_px =  compute_lane_offset(lane_mask, 180)
-
-        # Compute drivable area ratio
-        drivable_mask = da_mask  # (already a binary 0/1 array)
-        drivable_ratio = float(drivable_mask.sum() / drivable_mask.size)
-
-        # vx
-        if not hasattr(main, "prev_centroids"):
-            main.prev_centroids = {}
-
-        centroids = det.xyxy[:, :4].copy()
-        centroids = (centroids[:, 0:2] + centroids[:, 2:4]) / 2   # (x,y)
-
-
-        # Prepare object list from detections
-        objects_list = []
-        for (bbox, cls_id, track_id, (cx,cy)) in zip(det.xyxy, det.class_id, det.tracker_id, centroids):
-            x1, y1, x2, y2 = map(int, bbox)
-            class_name = model.names[int(cls_id)]
-            obj_id = int(track_id) if track_id is not None else None
-
-            # vx is a raw measure of how many pixels an object shifts left or right from one video frame to the next.
-            vx = None
-            if track_id is not None:
-                if track_id in main.prev_centroids:
-                    dx = cx - main.prev_centroids[track_id][0]
-                    # vx in pixels/frame; I can convert to km/h via homography if I wish
-                    vx = float(dx)
-                main.prev_centroids[track_id] = (cx, cy)
-
-            objects_list.append({
-                "id": obj_id,
-                "cls": class_name,
-                "bbox": [x1, y1, x2, y2],
-                "vx": vx
-            })
-
-        # Create and send/print JSON message
-        msg = {
-            "t": idx,
-            "ego_lane_offset_px": lane_offset_px,
-            "drivable_ratio": drivable_ratio,
-            "objects": objects_list
-        }
-
-        # publish to context engine on every other frame
-        if ((idx-1) % 1) == 0:
-            pub.send_json(msg)         
-
-        # Print the message for verification
-        print(msg)
-
-        # save log to file
-        log_file.write(f"{msg}")
-        log_file.flush()
+        # # Compute drivable area ratio
+        # drivable_mask = da_mask  # (already a binary 0/1 array)
+        # drivable_ratio = float(drivable_mask.sum() / drivable_mask.size)
 
     fps = idx / (time.time() - t0)
     print(f"✓ Saved {args.out} · {idx} frames · {fps:.1f} FPS")
 
 if __name__ == "__main__":
     main()
-
