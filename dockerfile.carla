@@ -1,0 +1,97 @@
+# =========================
+# Stage 1: Build CARLA 0.10.0 (UE5)
+# =========================
+FROM ubuntu:22.04 AS builder
+
+# Non-interactive apt and consistent timezone
+ENV TZ=Etc/UTC 
+ENV DEBIAN_FRONTEND=noninteractive 
+ENV LANG=C.UTF-8
+
+# Install core build tools and dependencies.
+# We add Kitware's APT repo to get an updated CMake (Ubuntu 22.04's default may be too old for CARLA):contentReference[oaicite:57]{index=57}.
+RUN apt-get update && apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg lsb-release && \
+    # Add Kitware APT source for latest CMake
+    curl -fsSL https://apt.kitware.com/keys/kitware-archive-latest.asc | gpg --dearmor -o /usr/share/keyrings/kitware-archive-keyring.gpg && \
+    echo "deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main" \
+         > /etc/apt/sources.list.d/kitware.list && \
+    # Ensure Kitware CMake (3.x) is preferred over any older version:contentReference[oaicite:58]{index=58}
+    echo "Package: cmake*\nPin: origin apt.kitware.com\nPin-Priority: 1001" > /etc/apt/preferences.d/kitware-cmake.pref && \
+    apt-get update && \
+    # Install packages required for building CARLA and UE5:contentReference[oaicite:59]{index=59}:contentReference[oaicite:60]{index=60}
+    apt-get install -y --no-install-recommends \
+        build-essential make ninja-build \
+        libvulkan1 libjpeg-dev libpng-dev libtiff5-dev libxml2-dev \
+        libtool rsync sed curl git git-lfs \
+        python3 python3-dev python3-pip python3-venv python-is-python3 cmake && \
+    # Clean up apt caches to reduce image size
+    rm -rf /var/lib/apt/lists/* 
+
+# Ensure Git LFS is initialized (needed for large asset files in CARLA content repo)
+RUN git lfs install
+
+# Clone CARLA's Unreal Engine 5.5 fork (requires GitHub credentials linked to Epic Games).
+# The repo is CarlaUnreal/UnrealEngine, branch "ue5-dev-carla" (tag 0.10.0 corresponds to UE5.5):contentReference[oaicite:61]{index=61}.
+# We put UnrealEngine in /opt/UnrealEngine for reference.
+WORKDIR /opt
+RUN git clone --depth=1 --branch ue5-dev-carla https://github.com/CarlaUnreal/UnrealEngine.git && \
+    cd UnrealEngine && \
+    # Run Unreal setup scripts: this will download dependencies (~> 10GB) and generate files
+    ./Setup.sh && \
+    ./GenerateProjectFiles.sh && \
+    # Build Unreal Engine (this will take a long time; use multiple cores if available)
+    make -j$(nproc)
+
+# Set an environment variable for the Unreal Engine path, as required by CARLA build scripts:contentReference[oaicite:62]{index=62}:contentReference[oaicite:63]{index=63}.
+ENV CARLA_UNREAL_ENGINE_PATH=/opt/UnrealEngine
+
+# Clone the CARLA simulator source (0.10.0 release).
+WORKDIR /opt
+RUN git clone --depth=1 --branch 0.10.0 https://github.com/carla-simulator/carla.git
+
+# Download CARLA content (maps, assets) for UE5.
+# The content repository is large (several GB). We clone only the UE5 branch (ue5-dev).
+RUN mkdir -p /opt/carla/Unreal/CarlaUnreal/Content && \
+    git clone --depth=1 --branch ue5-dev https://bitbucket.org/carla-simulator/carla-content.git /opt/carla/Unreal/CarlaUnreal/Content/Carla
+
+# Build CARLA 0.10.0 with Unreal Engine.
+# We use CMake with Ninja to configure and build. 
+# - BUILD_CARLA_UNREAL=ON and CARLA_UNREAL_ENGINE_PATH are set to integrate the UE5 engine:contentReference[oaicite:64]{index=64}.
+# - CARLA_UNREAL_BUILD_TYPE=Shipping for an optimized build (no editor overhead):contentReference[oaicite:65]{index=65}.
+# - ENABLE_ROS2 can be ON or OFF; we disable it here for simplicity (requires ROS2 libs if ON).
+WORKDIR /opt/carla
+RUN cmake -B Build -S . -G Ninja \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DBUILD_CARLA_UNREAL=ON \
+      -DCARLA_UNREAL_ENGINE_PATH=$CARLA_UNREAL_ENGINE_PATH \
+      -DCARLA_UNREAL_BUILD_TYPE=Shipping \
+      -DENABLE_ROS2=OFF && \
+    cmake --build Build --target package -j$(nproc)
+# The above will compile CARLA and package the simulator. 
+# The packaged build output will be in Build/Package (a folder containing CarlaUnreal.sh, binaries, etc.).
+
+# =========================
+# Stage 2: Runtime Image for CARLA
+# =========================
+FROM ubuntu:22.04 AS runtime
+
+ENV TZ=Etc/UTC 
+ENV DEBIAN_FRONTEND=noninteractive 
+ENV LANG=C.UTF-8
+
+# Install runtime dependencies (graphics, Vulkan, etc.). 
+# We include Vulkan loader and common image libs that CARLA uses.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libvulkan1 libjpeg8 libpng16-16 libtiff5 libxml2 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy the packaged CARLA simulator from the builder stage.
+# It's located in /opt/carla/Build/Package after the build.
+COPY --from=builder /opt/carla/Build/Package /opt/carla
+
+WORKDIR /opt/carla
+# Set default command to run CARLA server in off-screen mode with no audio.
+# Users can override this in `docker run` if they want a different configuration.
+CMD ["./CarlaUnreal.sh", "-RenderOffScreen", "-nosound"]
+

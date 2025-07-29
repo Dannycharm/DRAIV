@@ -16,8 +16,8 @@ def main():
     # 2. Initialize your ContextEngine
     # context_engine = ContextEngine(log_to_file=True, log_file_path="drive_events.log", pub=pub)
     # Test without publisher
-    context_engine = ContextEngine()
-
+    # context_engine = ContextEngine()
+    context_engine = ContextEngine(log_to_file=True, log_file_path="drive_events.log")
     print("ContextEngine ready, waiting for perception data...")
 
       # 3. Main loop for receiving and processing perception frames
@@ -26,10 +26,11 @@ def main():
             # Receive one perception message
             msg = sub.recv_json()  # This correctly receives a single dictionary
             print("Received frame:", msg)
+            t0 = time.time()
             # Process the received message using the ContextEngine
-            # context_engine.process_frame(msg)
-
-           
+            context_engine.process_frame(msg)
+            # print("Received frame:", msg.get("t"))
+            print(f"latency is: {(time.time() - t0) * 1000}ms")
     except KeyboardInterrupt:
         print("\nExiting. Closing ZeroMQ sockets and log file.")
     finally:

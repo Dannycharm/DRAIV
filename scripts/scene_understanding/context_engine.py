@@ -23,11 +23,11 @@ class ContextEngine:
         self.events_log = []
 
         # Threshold parameters (tunable as needed)
-        self.LANE_OFFSET_THRESHOLD = 400         # px; beyond this lateral offset, consider lane departure
-        self.DRIVABLE_RATIO_LANE_THRESH = 0.5    # if drivable area fraction falls below this, possibly off-lane
+        self.LANE_OFFSET_THRESHOLD = 390         # px; beyond this lateral offset, consider lane departure
+        self.DRIVABLE_RATIO_LANE_THRESH = 0.05    # if drivable area fraction falls below this, possibly off-lane
         self.VX_FRONT_THRESHOLD = 5.0            # px/frame; max lateral pixel shift to consider object in our lane (small = in path)
-        self.DRIVABLE_RATIO_DISTANCE_THRESH = 0.5 # if drivable ratio below this with a car ahead, distance is unsafe
-
+        self.DRIVABLE_RATIO_DISTANCE_THRESH = 0.05 # if drivable ratio below this with a car ahead, distance is unsafe
+        self.FRONT_VEHICLE_DISTANCE_THRESH = 97.0
         # To publish events from ContextEngine
         self.pub = pub
 
@@ -41,13 +41,18 @@ class ContextEngine:
         # Extract fields from the perception message
         t = msg.get("t")  # timestamp or frame index
         lane_offset = msg.get("ego_lane_offset_px", 0.0)
+        if lane_offset == None:
+            lane_offset = 0.0
+
         drivable_ratio = msg.get("drivable_ratio", 1.0)
+        if drivable_ratio == None:
+            drivable_ratio = 1.0
         objects = msg.get("objects", [])
 
         # --- Lane Departure Detection ---
         # Condition: car significantly off-center or minimal drivable area ahead (indicating off road)
-        lane_departure_condition = (abs(lane_offset) > self.LANE_OFFSET_THRESHOLD)  # or \
-                                   # (drivable_ratio < self.DRIVABLE_RATIO_LANE_THRESH)
+        lane_departure_condition = (abs(lane_offset) > self.LANE_OFFSET_THRESHOLD)  or \
+                                   (drivable_ratio < self.DRIVABLE_RATIO_LANE_THRESH)
         if lane_departure_condition:
             if not self.lane_departure_active:
                 # Lane departure just started – trigger event
@@ -87,16 +92,24 @@ class ContextEngine:
 
         # --- Unsafe Following Distance Detection ---
         # Determine if a vehicle is directly ahead (low lateral movement relative to us)
-        vehicle_ahead = False
+        vehicle_close_ahead = False
         for obj in objects:
-            if obj.get("class") in ["car", "truck", "bus", "motorcycle", "bicycle", "trailer", "other vehicle"]:  # vehicle types
+            if obj.get("cls") in ["car", "truck", "bus", "motorcycle", "bicycle", "trailer", "other vehicle"]:  # vehicle types
                 # vx is the horizontal pixel shift per frame (given by perception tracking)
-                vx = obj.get("vx", 0.0)
-                if abs(vx) < self.VX_FRONT_THRESHOLD:
-                    vehicle_ahead = True
+                vx = obj.get("vx")
+                if vx is None:
+                    vx = 0.0
+                bbox = obj.get("bbox")
+                if bbox is not None and len(bbox) > 1:
+                    front_vehicle_distance = bbox[1]
+                else:
+                    front_vehicle_distance = float("inf")  # default far value
+
+                if (abs(vx) < self.VX_FRONT_THRESHOLD) and ( front_vehicle_distance < self.FRONT_VEHICLE_DISTANCE_THRESH) :
+                    vehicle_close_ahead = True
                     break
         # Condition: a vehicle ahead AND drivable road area greatly reduced (front vehicle very close)
-        unsafe_distance_condition = vehicle_ahead and (drivable_ratio < self.DRIVABLE_RATIO_DISTANCE_THRESH)
+        unsafe_distance_condition = vehicle_close_ahead and (drivable_ratio < self.DRIVABLE_RATIO_DISTANCE_THRESH)
         if unsafe_distance_condition:
             if not self.unsafe_distance_active:
                 # Start of unsafe following distance event
@@ -137,4 +150,3 @@ class ContextEngine:
             self.log_file.close()
         if self.pub:
             pub.close()
-

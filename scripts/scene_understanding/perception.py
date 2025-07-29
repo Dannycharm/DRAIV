@@ -1,3 +1,5 @@
+#Perception.py
+
 # This runs in real time, produces symbolic facts from each frame such as object detections + ByteTrack IDs + segmentation masks. This is also used for visualizing the lane and drivable area segmentation masks and detection annotations on videos
 
 import argparse
@@ -57,19 +59,19 @@ def letterbox_for_img(img, new_shape=(640, 640), color=(114, 114, 114), auto=Tru
 
 def compute_lane_offset(lane_mask: np.ndarray,
                         bottom_rows: int = 100) -> float | None:
-    
+
     cols = np.where(lane_mask[-bottom_rows:, :] > 0)[1]
     if len(cols) < 2:          # not enough skeleton pixels visible
         return None
     lane_center = int(cols.mean())
     img_center  = lane_mask.shape[1] // 2
     # + offset  => drift right,  – offset => drift left
-    return img_center - lane_center
+    return (img_center - lane_center), img_center
 
 #--------------------------------------------------------------------------
 
 def main():
-    time.sleep(12)  # Wait for subscriber to connect for 15 seconds
+    time.sleep(2)  # Wait for subscriber to connect for 15 seconds
     # write output
     log_file = open("log_perception.txt", 'w')
 
@@ -104,7 +106,7 @@ def main():
         raise FileNotFoundError(args.source)
     info   = sv.VideoInfo.from_video_path(args.source)
     frames = sv.get_video_frames_generator(args.source)
-    
+
     t0 = time.time()
     for idx, frame in enumerate(frames, 1):
 
@@ -135,7 +137,11 @@ def main():
         lane_mask = ll_mask.astype(np.uint8)  # ensure it's binary 0/1 as uint8
 
         # lane offset
-        lane_offset_px =  compute_lane_offset(lane_mask, 180)
+        lane_result =  compute_lane_offset(lane_mask, 180)
+        if lane_result is None:
+            lane_offset_px, car_center = None, None
+        else:
+            lane_offset_px, car_center = lane_result
 
         # Compute drivable area ratio
         drivable_mask = da_mask  # (already a binary 0/1 array)
@@ -164,25 +170,27 @@ def main():
                     # vx in pixels/frame; I can convert to km/h via homography if I wish
                     vx = float(dx)
                 main.prev_centroids[track_id] = (cx, cy)
-
+            cx, cy = float(cx), float(cy)
             objects_list.append({
                 "id": obj_id,
                 "cls": class_name,
                 "bbox": [x1, y1, x2, y2],
-                "vx": vx
+                "vx": vx,
+                "object_center_coord": [cx, cy] 
             })
 
         # Create and send/print JSON message
         msg = {
             "t": idx,
+            "ego_center": car_center,
             "ego_lane_offset_px": lane_offset_px,
             "drivable_ratio": drivable_ratio,
             "objects": objects_list
         }
 
-        # publish to context engine on every other frame
+        # publish to context engine on every __ frame
         if ((idx-1) % 1) == 0:
-            pub.send_json(msg)         
+            pub.send_json(msg)
 
         # Print the message for verification
         print(msg)
@@ -196,4 +204,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
