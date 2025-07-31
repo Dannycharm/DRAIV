@@ -57,17 +57,78 @@ def letterbox_for_img(img, new_shape=(640, 640), color=(114, 114, 114), auto=Tru
 
 #--------------------------------------------------------------------------
 
-def compute_lane_offset(lane_mask: np.ndarray,
-                        bottom_rows: int = 100) -> float | None:
+def compute_lane_offset(lane_mask: np.ndarray, da_mask: np.ndarray,
+                                  bottom_rows: int = 100, lane_width: int = 450, unreliability_thresh: float = 30.0):
+    lane_cols = np.where(lane_mask[-bottom_rows:, :] > 0)[1]
+    da_cols = np.where(da_mask[-bottom_rows:, :] > 0)[1]
 
-    cols = np.where(lane_mask[-bottom_rows:, :] > 0)[1]
-    if len(cols) < 2:          # not enough skeleton pixels visible
+    # If detection failed
+    if len(lane_cols) == 0 or len(da_cols) == 0:
+        print ("None at step 1")
+        return 5000
+
+    lane_width_measured = max(lane_cols) - min(lane_cols)
+    da_width_measured = max(da_cols) - min(da_cols)
+
+    def lane_width_score(measured, expected=lane_width):
+        if measured <= expected:
+            return 100.0
+        elif measured > 1.03 * expected:
+            return 0.0
+        else:
+            #  gives a linearly decreasing score as the measured lane width deviates further from the expected width within this specific range
+            return 100 * (2 * expected - measured) / expected
+
+    lane_score = lane_width_score(lane_width_measured, lane_width)
+    da_score = lane_width_score(da_width_measured, lane_width)
+
+    # Penalty for abnormal overlaps or narrow lanes/DAs
+    condition = (
+        lane_width_measured < lane_width or
+        da_width_measured < lane_width or
+        (max(da_cols) - min(lane_cols)) > lane_width or
+        (max(lane_cols) - min(da_cols)) > lane_width
+    )
+
+    def overlap_penalty():
+        penalties = []
+        if lane_width_measured < lane_width:
+            penalties.append(100 * (lane_width - lane_width_measured) / lane_width)
+        if da_width_measured < lane_width:
+            penalties.append(100 * (lane_width - da_width_measured) / lane_width)
+        if (max(da_cols) - min(lane_cols)) > lane_width:
+            penalties.append(100 * ((max(da_cols) - min(lane_cols)) - lane_width) / lane_width)
+        if (max(lane_cols) - min(da_cols)) > lane_width:
+            penalties.append(100 * ((max(lane_cols) - min(da_cols)) - lane_width) / lane_width)
+        return max(penalties) if penalties else 0
+
+    penalty = overlap_penalty() if condition else 0
+
+    if penalty > 100:
+        print ("None at step 2")
+        print("Penalty: ", penalty)
         return None
-    lane_center = int(cols.mean())
-    img_center  = lane_mask.shape[1] // 2
-    # + offset  => drift right,  – offset => drift left
-    return (img_center - lane_center), img_center
 
+
+    lane_center = int(lane_cols.mean())
+    da_center = int(da_cols.mean())
+
+    percent_difference = (abs(lane_center - da_center) * 100) / ((lane_center + da_center) / 2)
+    if percent_difference > unreliability_thresh:
+        print ("None at step 3")
+        print("percent difference: ", percent_difference)
+        return None
+    else:
+        center = (lane_center + da_center) // 2
+    print( "precent difference when passed is: ", percent_difference)
+
+    img_center = lane_mask.shape[1] // 2
+    # Final score combines width scores minus any penalty, clipped to [0, 100]
+    final_score = (lane_score + da_score) / 2 - penalty
+    final_score = max(0.0, min(100.0, final_score))
+
+    offset = (img_center - center)
+    return offset, img_center, final_score
 #--------------------------------------------------------------------------
 
 def main():
@@ -137,12 +198,14 @@ def main():
         lane_mask = ll_mask.astype(np.uint8)  # ensure it's binary 0/1 as uint8
 
         # lane offset
-        lane_result =  compute_lane_offset(lane_mask, 180)
+        lane_result = compute_lane_offset(lane_mask, da_mask, bottom_rows=180, lane_width=600, unreliability_thresh=50.0)
         if lane_result is None:
-            lane_offset_px, car_center = None, None
+            lane_offset_px, car_center, confidence_score = None, None, 0.0
+        elif lane_result == 5000:
+            lane_offset_px, car_center, confidence_score = 5000, None, 0.0
         else:
-            lane_offset_px, car_center = lane_result
-
+            lane_offset_px, car_center, confidence_score = lane_result
+        confidence_score = float(confidence_score)
         # Compute drivable area ratio
         drivable_mask = da_mask  # (already a binary 0/1 array)
         drivable_ratio = float(drivable_mask.sum() / drivable_mask.size)
@@ -171,12 +234,26 @@ def main():
                     vx = float(dx)
                 main.prev_centroids[track_id] = (cx, cy)
             cx, cy = float(cx), float(cy)
+
+            # This checks if a pedestrian is within the overall boundary of the drivable area or lane boundary
+            if class_name == 'pedestrian':
+                    foot_x = int((x1 + x2) / 2)
+                    foot_y = int(y2)
+                    # clamp indices to image size
+                    h, w = lane_mask.shape
+                    foot_x = np.clip(foot_x, 0, w-1)
+                    foot_y = np.clip(foot_y, 0, h-1)
+                    is_on_lane = lane_mask[foot_y, foot_x] > 0
+                    is_on_drivable = da_mask[foot_y, foot_x] > 0
+                    if is_on_lane or is_on_drivable:
+                        class_name = 'pedestrian_on_road'
+
             objects_list.append({
                 "id": obj_id,
                 "cls": class_name,
                 "bbox": [x1, y1, x2, y2],
                 "vx": vx,
-                "object_center_coord": [cx, cy] 
+                "object_center_coord": [cx, cy]
             })
 
         # Create and send/print JSON message
@@ -184,6 +261,7 @@ def main():
             "t": idx,
             "ego_center": car_center,
             "ego_lane_offset_px": lane_offset_px,
+            "lane_confidence_score": confidence_score,
             "drivable_ratio": drivable_ratio,
             "objects": objects_list
         }
@@ -204,3 +282,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
