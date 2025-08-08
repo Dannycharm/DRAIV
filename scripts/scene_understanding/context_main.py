@@ -8,16 +8,14 @@ def main():
     sub.connect("tcp://127.0.0.1:5555")  # Connect to perception publisher
     sub.setsockopt_string(zmq.SUBSCRIBE, "")  # Subscribe to all topics (if any)
     # sub.setsockopt(zmq.RCVHWM, 10000)
-    sub.setsockopt(zmq.CONFLATE, 1)
+    # sub.setsockopt(zmq.CONFLATE, 1)
+    
     # To publish events from ContextEngine
     pub = zmq_context.socket(zmq.PUB)
-    pub.bind("tcp://*:5560")  # Bind publisher for events (or connect to an events broker)
+    pub.bind("tcp://127.0.0.1:5575")  # Bind publisher for events (or connect to an events broker)
 
     # 2. Initialize your ContextEngine
-    # context_engine = ContextEngine(log_to_file=True, log_file_path="drive_events.log", pub=pub)
-    # Test without publisher
-    # context_engine = ContextEngine()
-    context_engine = ContextEngine(log_to_file=True, log_file_path="drive_events.log")
+    context_engine = ContextEngine(log_to_file=True, log_file_path="drive_events.log", pub=pub)
     print("ContextEngine ready, waiting for perception data...")
 
       # 3. Main loop for receiving and processing perception frames
@@ -25,12 +23,12 @@ def main():
         while True:
             # Receive one perception message
             msg = sub.recv_json()  # This correctly receives a single dictionary
-            print("Received frame:", msg)
-            t0 = time.time()
+            # print("Received frame:", msg)
+            # t0 = time.time()
             # Process the received message using the ContextEngine
             context_engine.process_frame(msg)
             # print("Received frame:", msg.get("t"))
-            print(f"latency is: {(time.time() - t0) * 1000}ms")
+            # print(f"latency is: {(time.time() - t0) * 1000}ms")
     except KeyboardInterrupt:
         print("\nExiting. Closing ZeroMQ sockets and log file.")
     finally:

@@ -13,7 +13,7 @@ module load apptainer/1.1.9-gcc-13.2.0
 
 # ───────────── host-side paths ─────────────
 DATA_DIR=/scratch/dannycharm-alt-REU/DRAIV/datasets
-IMG=/scratch/dannycharm-alt-REU/DRAIV/draiv_ml.sif
+IMG=/scratch/dannycharm-alt-REU/DRAIV/draiv_ml_4.sif
 REPO=/scratch/dannycharm-alt-REU/DRAIV           # git repo root
 # ────────────────────────────────────────────
 

@@ -6,6 +6,8 @@ import sys
 from pathlib import Path
 import torch
 import numpy as np
+import zmq
+from skimage.morphology import thin      # or skeletonize
 # Tracking and Detection
 import supervision as sv
 from ultralytics import YOLO
@@ -14,6 +16,14 @@ from ultralytics import YOLO
 parent_dir = (Path(__file__).parent.parent / 'TwinLiteNetPlus_scripts').resolve()
 sys.path.append(str(parent_dir))
 from model.model import TwinLiteNetPlus
+
+#  JSON publishing stub (ZeroMQ)
+def setup_pub(port: int = 5555):
+    ctx = zmq.Context.instance()
+    pub = ctx.socket(zmq.PUB)
+    pub.setsockopt(zmq.SNDHWM, 10000)
+    pub.bind(f"tcp://127.0.0.1:{port}")
+    return pub
 
 
 def letterbox_for_img(img, new_shape=(640, 640), color=(114, 114, 114), auto=True, scaleFill=False, scaleup=True):
@@ -40,12 +50,11 @@ def letterbox_for_img(img, new_shape=(640, 640), color=(114, 114, 114), auto=Tru
     left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
     img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
     return img, ratio, (dw, dh)
-
-def show_seg_result(img, result, palette=None):
-
+#--------------------------------
+def show_seg_result(img, result, palette=None):                                                                                               
     H_pad, W_pad = img.shape[:2]
-    da_mask_r = cv2.resize(result[0], (W_pad, H_pad), interpolation=cv2.INTER_NEAREST)
-    ll_mask_r = cv2.resize(result[1], (W_pad, H_pad), interpolation=cv2.INTER_NEAREST)
+    da_mask_r = cv2.resize(result[0], (W_pad, H_pad), interpolation=cv2.INTER_NEAREST)      
+    ll_mask_r = cv2.resize(result[1], (W_pad, H_pad), interpolation=cv2.INTER_NEAREST)     
     
     color_area = np.zeros((da_mask_r.shape[0], da_mask_r.shape[1], 3), dtype=np.uint8)
     color_area[da_mask_r == 1] = [0, 255, 0]
@@ -56,16 +65,38 @@ def show_seg_result(img, result, palette=None):
     img[color_mask != 0] = img[color_mask != 0] * 0.5 + color_seg[color_mask != 0] * 0.5
     img = img.astype(np.uint8)
     img = cv2.resize(img, (1280, 720), interpolation=cv2.INTER_LINEAR)
-    return img
+    return img     
+#--------------------------------------------------------------------------
+
+def compute_lane_offset(lane_mask: np.ndarray, bottom_rows: int = 20):
+    lane_cols = np.where(lane_mask[-bottom_rows:, :] > 0)[1]
+    # If detection failed
+    if len(lane_cols) == 0:
+        return None
+
+    lane_width = max(lane_cols) - min(lane_cols)
+    print("Mask Shape: ", lane_mask.shape)
+    lane_center = int(lane_cols.mean())
+    img_center = lane_mask.shape[1] // 2
+
+    offset = (img_center - lane_center)
+    return offset, lane_center, lane_width
+#--------------------------------------------------------------------------
 
 def main():
+    time.sleep(2)  # Wait for subscriber to connect for 15 seconds
+    # write output
+    log_file = open("log_perception.txt", 'w')
+
+    #  JSON publishing stub
+    pub = setup_pub()
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", type=str, default="/datasets/videos/dashcam_video_three.mp4", help="video path or camera index")
+    parser.add_argument("--source", type=str, default="/datasets/videos/unsafe_distance/dashcam_video_one.mp4", help="video path or camera index")
     parser.add_argument("--yolo_weight", type=str, default="/workspace/models/yolo_models/best.pt", help="YOLO .pt checkpoint")
     parser.add_argument("--seg_weight", type=str, default="/workspace/models/TwinLiteNet_models/large.pth", help="Segmentation model .pth")
-    parser.add_argument("--out", type=str, default="carla_3.avi")
-    parser.add_argument("--output_dir", default="./test_videos/lane_departure", help="Output directory for the video")    
+    parser.add_argument("--out", type=str, default="carla_3_test.avi")
+    parser.add_argument("--output_dir", default="./test_videos/unsafe_following", help="Output directory for the video")
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--hyp", type=str, default="/workspace/scripts/TwinLiteNetPlus_scripts/hyperparameters/twinlitev2_hyper.yaml")
     parser.add_argument("--config", default="large")
@@ -93,10 +124,7 @@ def main():
         raise FileNotFoundError(args.source)
     info   = sv.VideoInfo.from_video_path(args.source)
     frames = sv.get_video_frames_generator(args.source)
-    print("The video info is: ", info)
-    # info.width = 640
-    # info.height = 384
-    # print("The video info after change is: ", info)
+    
     ext = os.path.splitext(args.out)[1].lower()
     if   ext in (".mp4", ".m4v"): codec_pref = ["mp4v", "avc1", "H264"]
     elif ext in (".avi",):        codec_pref = ["MJPG", "XVID"]
@@ -112,7 +140,6 @@ def main():
             continue
     else:
         raise RuntimeError("OpenCV cannot encode the requested container; install opencv-python wheels or switch to .avi")
-
     t0 = time.time()
     for idx, frame in enumerate(frames, 1):
 
@@ -123,8 +150,7 @@ def main():
         tensor = torch.from_numpy(padded_rgb).to(seg_model_args.device).unsqueeze(0)
         tensor = tensor.half() / 255.0 if getattr(seg_model_args, 'half', True) else tensor.float() / 255.0
         da_seg_out, ll_seg_out = seg_model(tensor)
-        
-        # Useful if I want to rescale to original size i.e 1280x720
+
         _, _, H, W = tensor.shape
         pad_w, pad_h = map(int, pad)
         da_pred = da_seg_out[:, :, pad_h:H-pad_h, pad_w:W-pad_w]
@@ -133,14 +159,98 @@ def main():
         ll_mask = torch.nn.functional.interpolate(ll_pred, scale_factor=1/ratio[0], mode='bilinear')
         da_mask = torch.argmax(da_mask, 1).int().squeeze().cpu().numpy()
         ll_mask = torch.argmax(ll_mask, 1).int().squeeze().cpu().numpy()
+        print("da_mask shape: ", da_mask.shape)
+        print("ll_mask shape: ", ll_mask.shape)
 
         # Detect & Track
         det = sv.Detections.from_ultralytics(model(frame, device=args.device, verbose=False)[0])
         det = tracker.update_with_detections(det)
         labels = [f"{model.names[c]} #{tid}"
                   for c, tid in zip(det.class_id, det.tracker_id)]
-        
-        # Visualize segmentation and annotations
+
+        # Compute lane offset using the lane line mask (ll_mask)
+        lane_mask = ll_mask.astype(np.uint8)  # ensure it's binary 0/1 as uint8
+
+        # lane offset
+        lane_result = compute_lane_offset(lane_mask, bottom_rows=60)
+        if lane_result is None:
+            lane_offset_px, lane_center, lane_width = None, None, None
+        else:
+            lane_offset_px, lane_center, lane_width = lane_result
+            lane_width = int(lane_width)
+
+        # Compute drivable area ratio
+        drivable_mask = da_mask  # (already a binary 0/1 array)
+        drivable_ratio = float(drivable_mask.sum() / drivable_mask.size)
+
+        # vx
+        if not hasattr(main, "prev_centroids"):
+            main.prev_centroids = {}
+
+        centroids = det.xyxy[:, :4].copy()
+        centroids = (centroids[:, 0:2] + centroids[:, 2:4]) / 2   # (x,y)
+
+
+        # Prepare object list from detections
+        objects_list = []
+        for (bbox, cls_id, track_id, (cx,cy)) in zip(det.xyxy, det.class_id, det.tracker_id, centroids):
+            x1, y1, x2, y2 = map(int, bbox)
+            class_name = model.names[int(cls_id)]
+            obj_id = int(track_id) if track_id is not None else None
+
+            # vx is a raw measure of how many pixels an object shifts left or right from one video frame to the next.
+            vx = None
+            if track_id is not None:
+                if track_id in main.prev_centroids:
+                    dx = cx - main.prev_centroids[track_id][0]
+                    # vx in pixels/frame; I can convert to km/h via homography if I wish
+                    vx = float(dx)
+                main.prev_centroids[track_id] = (cx, cy)
+            cx, cy = float(cx), float(cy)
+
+            # This checks if a pedestrian is within the overall boundary of the drivable area or lane boundary
+            if class_name == 'pedestrian':
+                    foot_x = int((x1 + x2) / 2)
+                    foot_y = int(y2)
+                    # clamp indices to image size
+                    h, w = lane_mask.shape
+                    foot_x = np.clip(foot_x, 0, w-1)
+                    foot_y = np.clip(foot_y, 0, h-1)
+                    is_on_lane = lane_mask[foot_y, foot_x] > 0
+                    is_on_drivable = da_mask[foot_y, foot_x] > 0
+                    if is_on_lane or is_on_drivable:
+                        class_name = 'pedestrian_on_road'
+
+            objects_list.append({
+                "id": obj_id,
+                "cls": class_name,
+                "bbox": [x1, y1, x2, y2],
+                "vx": vx,
+                "object_center_coord": [cx, cy]
+            })
+
+        # Create and send/print JSON message
+        msg = {
+            "t": idx,
+            "lane_center": lane_center,
+            "ego_lane_offset_px": lane_offset_px,
+            "lane_width": lane_width,
+            "drivable_ratio": drivable_ratio,
+            "objects": objects_list
+        }
+
+        # publish to context engine on every __ frame
+        if ((idx-1) % 1) == 0:
+            pub.send_json(msg)
+
+        # Print the message for verification
+        # print(msg)
+
+        # save log to file
+        log_file.write(f"{msg}")
+        log_file.flush()
+       
+       # Visualize segmentation and annotations
 
         vis = show_seg_result(frame, (da_mask, ll_mask))
         vis = box_anno.annotate(vis, det)
@@ -150,6 +260,7 @@ def main():
     sink.__exit__(None, None, None)
     fps = idx / (time.time() - t0)
     print(f"✓ Saved {args.out} · {idx} frames · {fps:.1f} FPS")
+    log_file.close()
 
 if __name__ == "__main__":
     main()
