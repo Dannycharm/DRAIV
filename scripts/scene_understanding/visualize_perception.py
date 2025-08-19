@@ -95,7 +95,7 @@ def main():
     parser.add_argument("--source", type=str, default="/datasets/videos/unsafe_distance/dashcam_video_one.mp4", help="video path or camera index")
     parser.add_argument("--yolo_weight", type=str, default="/workspace/models/yolo_models/best.pt", help="YOLO .pt checkpoint")
     parser.add_argument("--seg_weight", type=str, default="/workspace/models/TwinLiteNet_models/large.pth", help="Segmentation model .pth")
-    parser.add_argument("--out", type=str, default="carla_3_test.avi")
+    parser.add_argument("--out", type=str, default="carla_one_test.avi")
     parser.add_argument("--output_dir", default="./test_videos/unsafe_following", help="Output directory for the video")
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--hyp", type=str, default="/workspace/scripts/TwinLiteNetPlus_scripts/hyperparameters/twinlitev2_hyper.yaml")
@@ -114,7 +114,7 @@ def main():
     model = YOLO(args.yolo_weight).to(args.device)
     tracker  = sv.ByteTrack(lost_track_buffer=120, minimum_matching_threshold=0.7, )
     box_anno = sv.BoxAnnotator()
-    lbl_anno = sv.LabelAnnotator(text_scale=0.2, text_thickness=0, text_padding=5)
+    lbl_anno = sv.LabelAnnotator()
     
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

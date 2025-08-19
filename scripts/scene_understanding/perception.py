@@ -6,12 +6,13 @@ import argparse
 import os
 import cv2
 import time
+import json
 import sys
 from pathlib import Path
 import torch
 import numpy as np
+import pandas as pd
 import zmq
-from skimage.morphology import thin      # or skeletonize
 # Tracking and Detection
 import supervision as sv
 from ultralytics import YOLO
@@ -66,25 +67,28 @@ def compute_lane_offset(lane_mask: np.ndarray, bottom_rows: int = 20):
     lane_width = max(lane_cols) - min(lane_cols)
     lane_center = int(lane_cols.mean())
     img_center = lane_mask.shape[1] // 2
-    
+
     offset = (img_center - lane_center)
     return offset, lane_center, lane_width
 #--------------------------------------------------------------------------
 
 def main():
-    time.sleep(2)  # Wait for subscriber to connect for 15 seconds
+    time.sleep(1)  # Wait for subscriber to wait
     # write output
     log_file = open("log_perception.txt", 'w')
 
     #  JSON publishing stub
     pub = setup_pub()
-
+    # if using default arguments 
+    sample_version = "two"
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", type=str, default="/datasets/videos/unsafe_distance/dashcam_video_one.mp4", help="video path or camera index")
+    parser.add_argument("--source", type=str, default=f"/datasets/videos/unsafe_distance/dashcam_video_{sample_version}.mp4", help="video path or camera index")
     parser.add_argument("--yolo_weight", type=str, default="/workspace/models/yolo_models/best.pt", help="YOLO .pt checkpoint")
     parser.add_argument("--seg_weight", type=str, default="/workspace/models/TwinLiteNet_models/large.pth", help="Segmentation model .pth")
     parser.add_argument("--device", type=str, default="cuda:0")
     parser.add_argument("--hyp", type=str, default="/workspace/scripts/TwinLiteNetPlus_scripts/hyperparameters/twinlitev2_hyper.yaml")
+    parser.add_argument("--ego_speed_source", type=str, default=f"/datasets/videos/unsafe_distance/ego_speed/ego_speed_{sample_version}.txt", help="The file containing the ego speed for each frame")
+    parser.add_argument("--thw", type=str, default=f"/datasets/videos/unsafe_distance/thw/thw_{sample_version}.txt" , help="The file containing the fround truth time head way for each frame")
     parser.add_argument("--config", default="large")
     args = parser.parse_args()
 
@@ -108,10 +112,19 @@ def main():
     info   = sv.VideoInfo.from_video_path(args.source)
     frames = sv.get_video_frames_generator(args.source)
 
-    t0 = time.time()
-    for idx, frame in enumerate(frames):
 
-         # One resize (BGR)
+    # ego frame speed
+    ego_speeds = pd.read_csv(args.ego_speed_source)
+    # thw
+    thw = pd.read_csv(args.thw)
+
+    # Assert that the lengths are equal. If not, raise an error with the given message.
+    assert len(ego_speeds) == info.total_frames and len(thw) == info.total_frames, "Frame count must be the same as the number of ego speed and thw entries."
+
+    t0 = time.time()
+    for (idx, frame), ego_speed, thw in zip(enumerate(frames), ego_speeds['ego_speed_mps'], thw['thw']):
+        seen_frame = time.time()
+        # One resize (BGR)
         padded, ratio, pad = letterbox_for_img(frame, new_shape=(384, 640), auto=True)
 
         padded_rgb = padded[:, :, ::-1].transpose(2, 0, 1).copy()
@@ -138,16 +151,16 @@ def main():
         lane_mask = ll_mask.astype(np.uint8)  # ensure it's binary 0/1 as uint8
 
         # lane offset
-        lane_result = compute_lane_offset(lane_mask, bottom_rows=40)
-        if lane_result is None:
-            lane_offset_px, lane_center, lane_width = None, None, None
-        else:
-            lane_offset_px, lane_center, lane_width = lane_result
-            lane_width = int(lane_width) 
+        # lane_result = compute_lane_offset(lane_mask, bottom_rows=40)
+        # if lane_result is None:
+        #     lane_offset_px, lane_center, lane_width = None, None, None
+        # else:
+        #     lane_offset_px, lane_center, lane_width = lane_result
+        #     lane_width = int(lane_width)
 
-        # Compute drivable area ratio
-        drivable_mask = da_mask  # (already a binary 0/1 array)
-        drivable_ratio = float(drivable_mask.sum() / drivable_mask.size)
+        # # Compute drivable area ratio
+        # drivable_mask = da_mask  # (already a binary 0/1 array)
+        # drivable_ratio = float(drivable_mask.sum() / drivable_mask.size)
 
         # vx
         if not hasattr(main, "prev_centroids"):
@@ -164,15 +177,15 @@ def main():
             class_name = model.names[int(cls_id)]
             obj_id = int(track_id) if track_id is not None else None
 
-            # vx is a raw measure of how many pixels an object shifts left or right from one video frame to the next.
-            vx = None
-            if track_id is not None:
-                if track_id in main.prev_centroids:
-                    dx = cx - main.prev_centroids[track_id][0]
-                    # vx in pixels/frame
-                    vx = float(dx)
-                main.prev_centroids[track_id] = (cx, cy)
-            cx, cy = float(cx), float(cy)
+            # # vx is a raw measure of how many pixels an object shifts left or right from one video frame to the next.
+            # vx = None
+            # if track_id is not None:
+            #     if track_id in main.prev_centroids:
+            #         dx = cx - main.prev_centroids[track_id][0]
+            #         # vx in pixels/frame
+            #         vx = float(dx)
+            #     main.prev_centroids[track_id] = (cx, cy)
+            # cx, cy = float(cx), float(cy)
 
             # This checks if a pedestrian is within the overall boundary of the drivable area or lane boundary
             if class_name == 'pedestrian':
@@ -189,35 +202,39 @@ def main():
 
             objects_list.append({
                 "id": obj_id,
-                "cls": class_name,
-                "bbox": [x1, y1, x2, y2],
-                "vx": vx,
-                "object_center_coord": [cx, cy]
+                "obj_cls": class_name,
+                "bbox": [x1, y1, x2, y2]
             })
 
         # Create and send/print JSON message
         msg = {
             "t": idx,
-            "lane_center": lane_center,
-            "ego_lane_offset_px": lane_offset_px,
-            "lane_width": lane_width,
-            "drivable_ratio": drivable_ratio,
-            "objects": objects_list
+            "seen_time": seen_frame,
+            "ego_speed_mps": ego_speed,
+            "objects": objects_list,
+            "thw": thw
         }
 
-        # publish to context engine 
+        # publish to context engine
         pub.send_json(msg)
 
         # Print the message for verification
         # print(msg)
 
         # save log to file
-        log_file.write(f"{msg}")
+        log_file.write(json.dumps(msg) + "\n")
         log_file.flush()
-
-    fps = idx / (time.time() - t0)
+        
+        # Throttle to target frame duration for ~30 FPS
+        #elapsed = time.time() - seen_frame
+        #frame_duration = 0.03 # 1 / 30  # 0.0333 seconds per frame
+        #if elapsed < frame_duration:
+            #time.sleep(frame_duration - elapsed)
+        
+        fps = idx / (time.time() - t0)
+    
     print(f"✓ {idx+1} frames · {fps:.1f} FPS")
     log_file.close()
 
 if __name__ == "__main__":
-    main()
+    main()    
